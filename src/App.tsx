@@ -52,11 +52,13 @@ type NumericSafetyLimitKey = {
 
 type ProjectAnalysis = {
   nominal: CoreSolution;
-  investor: CoreSolution;
+  current: CoreSolution;
   minFlow: MinimumFlowResult;
-  investorSafetyOk: boolean;
-  investorKtaOk: boolean;
+  currentSafetyOk: boolean;
+  currentKtaOk: boolean;
   tempOk: boolean;
+  currentLabel: string;
+  currentMassFlowKgS: number;
   deltas: {
     powerGainMW: number;
     powerGainPercent: number;
@@ -300,58 +302,57 @@ function buildProjectAnalysis(inputs: ModelInputs, limits: SafetyLimits): Projec
     dPebbleCm: 6,
     mDotKgS: 96,
   };
-  const investorInputs = {
-    ...inputs,
-    powerMW: 350,
-    dPebbleCm: 4,
-    mDotKgS: 96,
-  };
+  const currentInputs = inputs;
 
   const nominal = solveCore1DCase(nominalInputs);
-  const investor = solveCore1DCase(investorInputs);
-  const investorSafetyChecks = evaluateSafety(investor, limits);
-  const investorKtaChecks = buildKtaChecks(investor, investorInputs);
-  const investorSafetyOk = investorSafetyChecks.every((check) => check.ok);
-  const investorKtaOk = investorKtaChecks.every((check) => check.ok);
-  const tempOk = investor.summary.maxFuelCenterC <= limits.maxFuelCenterC;
-  const failedSafetyLabels = investorSafetyChecks
+  const current = solveCore1DCase(currentInputs);
+  const currentSafetyChecks = evaluateSafety(current, limits);
+  const currentKtaChecks = buildKtaChecks(current, currentInputs);
+  const currentSafetyOk = currentSafetyChecks.every((check) => check.ok);
+  const currentKtaOk = currentKtaChecks.every((check) => check.ok);
+  const tempOk = current.summary.maxFuelCenterC <= limits.maxFuelCenterC;
+  const failedSafetySummaries = currentSafetyChecks
     .filter((check) => !check.ok)
-    .map((check) => check.label);
-  const minFlow = findMinimumMassFlowForFuelLimit(investorInputs, limits.maxFuelCenterC);
+    .map(formatSafetyCheckSummary);
+  const minFlow = findMinimumMassFlowForFuelLimit(currentInputs, limits.maxFuelCenterC);
 
   const deltas = {
-    powerGainMW: investor.summary.totalPowerMW - nominal.summary.totalPowerMW,
-    powerGainPercent: percentChange(investor.summary.totalPowerMW, nominal.summary.totalPowerMW),
-    powerDensityDeltaMWM3: investor.summary.thermalPowerDensityMWM3 - nominal.summary.thermalPowerDensityMWM3,
-    powerDensityPercent: percentChange(investor.summary.thermalPowerDensityMWM3, nominal.summary.thermalPowerDensityMWM3),
-    maxFuelDeltaC: investor.summary.maxFuelCenterC - nominal.summary.maxFuelCenterC,
-    heliumOutletDeltaC: investor.summary.heliumOutletC - nominal.summary.heliumOutletC,
-    pressureDropDeltaKPa: investor.summary.totalPressureDropKPa - nominal.summary.totalPressureDropKPa,
-    pressureDropFactor: safeRatio(investor.summary.totalPressureDropKPa, nominal.summary.totalPressureDropKPa),
-    hydraulicPowerDeltaMW: investor.summary.hydraulicPowerMW - nominal.summary.hydraulicPowerMW,
-    hydraulicPowerFactor: safeRatio(investor.summary.hydraulicPowerMW, nominal.summary.hydraulicPowerMW),
-    hydraulicPowerShareDeltaPct: investor.summary.hydraulicPowerPercent - nominal.summary.hydraulicPowerPercent,
+    powerGainMW: current.summary.totalPowerMW - nominal.summary.totalPowerMW,
+    powerGainPercent: percentChange(current.summary.totalPowerMW, nominal.summary.totalPowerMW),
+    powerDensityDeltaMWM3: current.summary.thermalPowerDensityMWM3 - nominal.summary.thermalPowerDensityMWM3,
+    powerDensityPercent: percentChange(current.summary.thermalPowerDensityMWM3, nominal.summary.thermalPowerDensityMWM3),
+    maxFuelDeltaC: current.summary.maxFuelCenterC - nominal.summary.maxFuelCenterC,
+    heliumOutletDeltaC: current.summary.heliumOutletC - nominal.summary.heliumOutletC,
+    pressureDropDeltaKPa: current.summary.totalPressureDropKPa - nominal.summary.totalPressureDropKPa,
+    pressureDropFactor: safeRatio(current.summary.totalPressureDropKPa, nominal.summary.totalPressureDropKPa),
+    hydraulicPowerDeltaMW: current.summary.hydraulicPowerMW - nominal.summary.hydraulicPowerMW,
+    hydraulicPowerFactor: safeRatio(current.summary.hydraulicPowerMW, nominal.summary.hydraulicPowerMW),
+    hydraulicPowerShareDeltaPct: current.summary.hydraulicPowerPercent - nominal.summary.hydraulicPowerPercent,
     netThermalAfterHydraulicGainMW:
-      (investor.summary.totalPowerMW - investor.summary.hydraulicPowerMW)
+      (current.summary.totalPowerMW - current.summary.hydraulicPowerMW)
       - (nominal.summary.totalPowerMW - nominal.summary.hydraulicPowerMW),
   };
 
   return {
     nominal,
-    investor,
+    current,
     minFlow,
-    investorSafetyOk,
-    investorKtaOk,
+    currentSafetyOk,
+    currentKtaOk,
     tempOk,
+    currentLabel: formatVariantLabel(currentInputs),
+    currentMassFlowKgS: currentInputs.mDotKgS,
     deltas,
     verdict: buildProjectVerdict({
-      investorSafetyOk,
-      investorKtaOk,
+      currentSafetyOk,
+      currentKtaOk,
       tempOk,
       minFlow,
-      investor,
+      current,
+      currentLabel: formatVariantLabel(currentInputs),
+      currentMassFlowKgS: currentInputs.mDotKgS,
       limits,
-      failedSafetyLabels,
+      failedSafetySummaries,
     }),
   };
 }
@@ -400,23 +401,27 @@ function findMinimumMassFlowForFuelLimit(
 }
 
 function buildProjectVerdict({
-  investorSafetyOk,
-  investorKtaOk,
+  currentSafetyOk,
+  currentKtaOk,
   tempOk,
   minFlow,
-  investor,
+  current,
+  currentLabel,
+  currentMassFlowKgS,
   limits,
-  failedSafetyLabels,
+  failedSafetySummaries,
 }: {
-  investorSafetyOk: boolean;
-  investorKtaOk: boolean;
+  currentSafetyOk: boolean;
+  currentKtaOk: boolean;
   tempOk: boolean;
   minFlow: MinimumFlowResult;
-  investor: CoreSolution;
+  current: CoreSolution;
+  currentLabel: string;
+  currentMassFlowKgS: number;
   limits: SafetyLimits;
-  failedSafetyLabels: string[];
+  failedSafetySummaries: string[];
 }): ProjectAnalysis["verdict"] {
-  if (!investorKtaOk) {
+  if (!currentKtaOk) {
     return {
       status: "warn",
       title: "Uwaga: zakres KTA jest przekroczony",
@@ -424,13 +429,13 @@ function buildProjectVerdict({
     };
   }
 
-  if (investorSafetyOk) {
+  if (currentSafetyOk) {
     return {
       status: "ok",
-      title: "Wariant 350 MW / 4 cm spełnia ustawione limity",
+      title: "Aktualny wariant spełnia ustawione limity",
       text: limits.inherentSafetyEnabled
-        ? "Według aktualnego modelu steady-state wariant mieści się w limitach normalnej pracy i w progu gęstości mocy. DLOFC nadal wymaga osobnego modelu transjentu."
-        : "Według aktualnego modelu steady-state wariant mieści się w aktywnych limitach normalnej pracy. Gęstość mocy nie jest teraz włączona do oceny akceptacji.",
+        ? `${currentLabel} mieści się w limitach normalnej pracy i w progu gęstości mocy. DLOFC nadal wymaga osobnego modelu transjentu.`
+        : `${currentLabel} mieści się w aktywnych limitach normalnej pracy. Gęstość mocy nie jest teraz włączona do oceny akceptacji.`,
     };
   }
 
@@ -438,7 +443,7 @@ function buildProjectVerdict({
     return {
       status: "warn",
       title: "Temperatura paliwa ma zapas, ale wariant nie przechodzi pełnej oceny",
-      text: `Wariant 350 MW / 4 cm mieści się w limicie temperatury paliwa normalnej pracy, ale przekracza: ${failedSafetyLabels.join(", ")}.`,
+      text: `${currentLabel} mieści się w limicie temperatury paliwa normalnej pracy, ale przekracza: ${failedSafetySummaries.join(", ")}.`,
     };
   }
 
@@ -446,15 +451,24 @@ function buildProjectVerdict({
     return {
       status: "warn",
       title: "Wariant wymaga zwiększenia przepływu helu",
-      text: `Przy 96 kg/s temperatura paliwa przekracza limit ${fmt(limits.maxFuelCenterC, 0)} °C. Model znajduje minimalny przepływ około ${fmt(minFlow.mDotKgS, 1)} kg/s dla wariantu 350 MW / 4 cm.`,
+      text: `Przy aktualnym przepływie ${fmt(currentMassFlowKgS, 1)} kg/s temperatura paliwa przekracza limit ${fmt(limits.maxFuelCenterC, 0)} °C. Model znajduje minimalny przepływ około ${fmt(minFlow.mDotKgS, 1)} kg/s przy pozostałych nastawach z suwaków.`,
     };
   }
 
   return {
     status: "bad",
-    title: "Wariant inwestora nie spełnia ustawionych limitów",
-    text: `Największe ograniczenie w aktualnych nastawach to temperatura paliwa ${fmt(investor.summary.maxFuelCenterC, 1)} °C oraz limity przepływowe ustawione w panelu po prawej.`,
+    title: "Aktualny wariant nie spełnia ustawionych limitów",
+    text: `Największe ograniczenie w aktualnych nastawach to temperatura paliwa ${fmt(current.summary.maxFuelCenterC, 1)} °C oraz aktywne limity ustawione w panelu po prawej.`,
   };
+}
+
+function formatSafetyCheckSummary(check: SafetyCheck): string {
+  const digits = check.unit === "MW" ? 3 : check.unit === "MW/m³" ? 2 : 1;
+  return `${check.label} (${fmt(check.value, digits)} ${check.unit}; warunek ${check.condition})`;
+}
+
+function formatVariantLabel(inputs: Pick<ModelInputs, "powerMW" | "dPebbleCm" | "mDotKgS">): string {
+  return `Aktualny wariant ${fmt(inputs.powerMW, 0)} MW / ${fmt(inputs.dPebbleCm, 1)} cm / ${fmt(inputs.mDotKgS, 1)} kg/s`;
 }
 
 function MetricGrid({
@@ -516,12 +530,12 @@ function AnalysisView({
   limits: SafetyLimits;
 }) {
   const nominal = analysis.nominal.summary;
-  const investor = analysis.investor.summary;
+  const current = analysis.current.summary;
   const minFlow = analysis.minFlow;
   const minFlowSummary = minFlow?.solution.summary;
-  const currentFlowTempMargin = limits.maxFuelCenterC - investor.maxFuelCenterC;
-  const powerDensityMargin = limits.maxThermalPowerDensityMWM3 - investor.thermalPowerDensityMWM3;
-  const minFlowDelta = minFlow ? minFlow.mDotKgS - 96 : null;
+  const currentFlowTempMargin = limits.maxFuelCenterC - current.maxFuelCenterC;
+  const powerDensityMargin = limits.maxThermalPowerDensityMWM3 - current.thermalPowerDensityMWM3;
+  const minFlowDelta = minFlow ? minFlow.mDotKgS - analysis.currentMassFlowKgS : null;
 
   return (
     <section className="analysis-view">
@@ -540,15 +554,15 @@ function AnalysisView({
         <AnalysisCard
           icon={<TrendingUp size={18} />}
           title="Cel 1: porównanie wariantów"
-          value={`+${fmt(analysis.deltas.powerGainMW, 0)} MWth`}
-          detail={`Moc rośnie o ${fmt(analysis.deltas.powerGainPercent, 1)}%, T paliwa zmienia się o ${signed(analysis.deltas.maxFuelDeltaC, 1)} °C.`}
+          value={`${signed(analysis.deltas.powerGainMW, 0)} MWth`}
+          detail={`Moc zmienia się o ${signed(analysis.deltas.powerGainPercent, 1)}%, T paliwa o ${signed(analysis.deltas.maxFuelDeltaC, 1)} °C.`}
           status={analysis.tempOk ? "ok" : "warn"}
         />
         {limits.inherentSafetyEnabled && (
           <AnalysisCard
             icon={<Zap size={18} />}
             title="Gęstość mocy cieplnej"
-            value={`${fmt(investor.thermalPowerDensityMWM3, 2)} MW/m³`}
+            value={`${fmt(current.thermalPowerDensityMWM3, 2)} MW/m³`}
             detail={`Limit ${fmt(limits.maxThermalPowerDensityMWM3, 1)} MW/m³, margines ${signed(powerDensityMargin, 2)} MW/m³; zmiana ${fmt(analysis.deltas.powerDensityPercent, 1)}%.`}
             status={powerDensityMargin >= 0 ? "ok" : "bad"}
           />
@@ -556,23 +570,23 @@ function AnalysisView({
         <AnalysisCard
           icon={<Flame size={18} />}
           title="Temperatura paliwa"
-          value={`${fmt(investor.maxFuelCenterC, 1)} °C`}
-          detail={`Limit ${fmt(limits.maxFuelCenterC, 0)} °C, margines ${signed(currentFlowTempMargin, 1)} °C przy 350 MW / 4 cm / 96 kg/s.`}
+          value={`${fmt(current.maxFuelCenterC, 1)} °C`}
+          detail={`Limit ${fmt(limits.maxFuelCenterC, 0)} °C, margines ${signed(currentFlowTempMargin, 1)} °C dla aktualnych suwaków.`}
           status={currentFlowTempMargin >= 0 ? "ok" : "bad"}
         />
         <AnalysisCard
           icon={<Gauge size={18} />}
           title="Cel 2: koszt przepływu"
           value={`${fmt(analysis.deltas.pressureDropFactor, 2)}× Δp`}
-          detail={`P dmuchawy: ${fmt(investor.hydraulicPowerMW, 3)} MW vs limit ${fmt(limits.maxHydraulicPowerMW, 1)} MW; udział ${fmt(investor.hydraulicPowerPercent, 2)}%.`}
-          status={investor.hydraulicPowerMW <= limits.maxHydraulicPowerMW ? "ok" : "warn"}
+          detail={`P dmuchawy: ${fmt(current.hydraulicPowerMW, 3)} MW vs limit ${fmt(limits.maxHydraulicPowerMW, 1)} MW; udział ${fmt(current.hydraulicPowerPercent, 2)}%.`}
+          status={current.hydraulicPowerMW <= limits.maxHydraulicPowerMW ? "ok" : "warn"}
         />
         <AnalysisCard
           icon={<Activity size={18} />}
           title="Cel 3: minimalny strumień helu"
           value={minFlow ? `${fmt(minFlow.mDotKgS, 1)} kg/s` : "brak <= 500"}
           detail={minFlow
-            ? `To ${signed(minFlowDelta ?? 0, 1)} kg/s względem 96 kg/s; T paliwa wtedy ${fmt(minFlowSummary?.maxFuelCenterC, 1)} °C.`
+            ? `To ${signed(minFlowDelta ?? 0, 1)} kg/s względem aktualnego przepływu; T paliwa wtedy ${fmt(minFlowSummary?.maxFuelCenterC, 1)} °C.`
             : "W zadanym zakresie szukania temperatura paliwa nie schodzi poniżej limitu."}
           status={minFlow ? "ok" : "bad"}
         />
@@ -583,8 +597,8 @@ function AnalysisView({
           <thead>
             <tr>
               <th>Wielkość</th>
-              <th>Nominalnie 250 MW / 6 cm</th>
-              <th>Inwestor 350 MW / 4 cm</th>
+              <th>Nominalnie 250 MW / 6 cm / 96 kg/s</th>
+              <th>Aktualnie wg suwaków</th>
               <th>Zmiana</th>
             </tr>
           </thead>
@@ -592,38 +606,38 @@ function AnalysisView({
             <tr>
               <td>Gęstość mocy cieplnej</td>
               <td>{fmt(nominal.thermalPowerDensityMWM3, 2)} MW/m³</td>
-              <td>{fmt(investor.thermalPowerDensityMWM3, 2)} MW/m³</td>
+              <td>{fmt(current.thermalPowerDensityMWM3, 2)} MW/m³</td>
               <td>{signed(analysis.deltas.powerDensityDeltaMWM3, 2)} MW/m³</td>
             </tr>
             <tr>
               <td>T paliwa max</td>
               <td>{fmt(nominal.maxFuelCenterC, 1)} °C</td>
-              <td>{fmt(investor.maxFuelCenterC, 1)} °C</td>
+              <td>{fmt(current.maxFuelCenterC, 1)} °C</td>
               <td>{signed(analysis.deltas.maxFuelDeltaC, 1)} °C</td>
             </tr>
             <tr>
               <td>T helu na wylocie</td>
               <td>{fmt(nominal.heliumOutletC, 1)} °C</td>
-              <td>{fmt(investor.heliumOutletC, 1)} °C</td>
+              <td>{fmt(current.heliumOutletC, 1)} °C</td>
               <td>{signed(analysis.deltas.heliumOutletDeltaC, 1)} °C</td>
             </tr>
             <tr>
               <td>Spadek ciśnienia</td>
               <td>{fmt(nominal.totalPressureDropKPa, 1)} kPa</td>
-              <td>{fmt(investor.totalPressureDropKPa, 1)} kPa</td>
+              <td>{fmt(current.totalPressureDropKPa, 1)} kPa</td>
               <td>{fmt(analysis.deltas.pressureDropFactor, 2)}×</td>
             </tr>
             <tr>
               <td>Moc hydrauliczna</td>
               <td>{fmt(nominal.hydraulicPowerMW, 3)} MW</td>
-              <td>{fmt(investor.hydraulicPowerMW, 3)} MW</td>
+              <td>{fmt(current.hydraulicPowerMW, 3)} MW</td>
               <td>{fmt(analysis.deltas.hydraulicPowerFactor, 2)}×</td>
             </tr>
             <tr>
               <td>Liczba kul</td>
               <td>{compact(nominal.nPebblesTotal)}</td>
-              <td>{compact(investor.nPebblesTotal)}</td>
-              <td>{fmt(safeRatio(investor.nPebblesTotal, nominal.nPebblesTotal), 2)}×</td>
+              <td>{compact(current.nPebblesTotal)}</td>
+              <td>{fmt(safeRatio(current.nPebblesTotal, nominal.nPebblesTotal), 2)}×</td>
             </tr>
           </tbody>
         </table>
