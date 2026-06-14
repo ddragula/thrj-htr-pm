@@ -9,7 +9,9 @@ import {
   ShieldCheck,
   SlidersHorizontal,
   Thermometer,
+  TrendingUp,
   XCircle,
+  Zap,
 } from "lucide-react";
 import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
@@ -18,6 +20,7 @@ import {
   CASE_PRESETS,
   DEFAULT_INPUTS,
   DEFAULT_LIMITS,
+  DLOFC_FUEL_PEAK_LIMIT_C,
   evaluateSafety,
   type CoreSolution,
   type KtaCheck,
@@ -27,11 +30,53 @@ import {
   solveCore1DCase,
 } from "./model/htrPm";
 
-type View = "charts" | "limits" | "kta" | "cases";
+type View = "charts" | "limits" | "kta" | "cases" | "analysis";
 
 type CalculationState =
   | { solution: CoreSolution; error?: undefined }
   | { solution?: undefined; error: string };
+
+type ComparisonRow = CoreSolution["summary"] & {
+  label: string;
+  ok: boolean;
+};
+
+type MinimumFlowResult = {
+  mDotKgS: number;
+  solution: CoreSolution;
+} | null;
+
+type NumericSafetyLimitKey = {
+  [Key in keyof SafetyLimits]: SafetyLimits[Key] extends number ? Key : never;
+}[keyof SafetyLimits];
+
+type ProjectAnalysis = {
+  nominal: CoreSolution;
+  investor: CoreSolution;
+  minFlow: MinimumFlowResult;
+  investorSafetyOk: boolean;
+  investorKtaOk: boolean;
+  tempOk: boolean;
+  deltas: {
+    powerGainMW: number;
+    powerGainPercent: number;
+    powerDensityDeltaMWM3: number;
+    powerDensityPercent: number;
+    maxFuelDeltaC: number;
+    heliumOutletDeltaC: number;
+    pressureDropDeltaKPa: number;
+    pressureDropFactor: number;
+    hydraulicPowerDeltaMW: number;
+    hydraulicPowerFactor: number;
+    hydraulicPowerShareDeltaPct: number;
+    netThermalAfterHydraulicGainMW: number;
+  };
+  verdict: {
+    status: "ok" | "warn" | "bad";
+    title: string;
+    text: string;
+  };
+};
 
 const chartColors = {
   helium: "#247a8b",
@@ -96,6 +141,13 @@ export default function App() {
       return [];
     }
   }, [inputs, limits]);
+  const projectAnalysis = useMemo(() => {
+    try {
+      return buildProjectAnalysis(inputs, limits);
+    } catch {
+      return null;
+    }
+  }, [inputs, limits]);
 
   const allSafetyOk = safetyChecks.every((check) => check.ok);
   const allKtaOk = ktaChecks.every((check) => check.ok);
@@ -104,7 +156,7 @@ export default function App() {
     setInputs((current) => ({ ...current, [key]: value }));
   }
 
-  function updateLimit(key: keyof SafetyLimits, value: number) {
+  function updateLimit(key: NumericSafetyLimitKey, value: number) {
     setLimits((current) => ({ ...current, [key]: value }));
   }
 
@@ -163,9 +215,10 @@ export default function App() {
           </div>
           <div className="tab-list" role="tablist" aria-label="Widoki wyników">
             <TabButton active={activeView === "charts"} onClick={() => setActiveView("charts")}>Wykresy</TabButton>
-            <TabButton active={activeView === "limits"} onClick={() => setActiveView("limits")}>Limity</TabButton>
-            <TabButton active={activeView === "kta"} onClick={() => setActiveView("kta")}>KTA</TabButton>
+            <TabButton active={activeView === "limits"} attention={!allSafetyOk} onClick={() => setActiveView("limits")}>Limity</TabButton>
+            <TabButton active={activeView === "kta"} attention={!allKtaOk} onClick={() => setActiveView("kta")}>KTA</TabButton>
             <TabButton active={activeView === "cases"} onClick={() => setActiveView("cases")}>Warianty</TabButton>
+            <TabButton active={activeView === "analysis"} onClick={() => setActiveView("analysis")}>Analiza</TabButton>
           </div>
         </header>
 
@@ -177,13 +230,16 @@ export default function App() {
         ) : (
           solution && (
             <>
-              <MetricGrid solution={solution} allSafetyOk={allSafetyOk} allKtaOk={allKtaOk} />
+              <MetricGrid solution={solution} limits={limits} />
 
+              {activeView === "analysis" && projectAnalysis && (
+                <AnalysisView analysis={projectAnalysis} limits={limits} />
+              )}
               {activeView === "charts" && (
-                <ChartsView solution={solution} />
+                <ChartsView solution={solution} limits={limits} />
               )}
               {activeView === "limits" && (
-                <LimitsView checks={safetyChecks} />
+                <LimitsView checks={safetyChecks} limits={limits} />
               )}
               {activeView === "kta" && (
                 <KtaView checks={ktaChecks} />
@@ -202,18 +258,34 @@ export default function App() {
           <RotateCcw size={16} />
           Reset limitów
         </button>
-        <RangeField label="T paliwa max" min={700} max={1800} step={5} unit="°C" value={limits.maxFuelCenterC} onChange={(value) => updateLimit("maxFuelCenterC", value)} />
-        <RangeField label="T helu na wylocie" min={500} max={1100} step={5} unit="°C" value={limits.maxHeliumOutletC} onChange={(value) => updateLimit("maxHeliumOutletC", value)} />
-        <RangeField label="Spadek ciśnienia" min={20} max={1000} step={5} unit="kPa" value={limits.maxPressureDropKPa} onChange={(value) => updateLimit("maxPressureDropKPa", value)} />
-        <RangeField label="Moc hydr. / cieplna" min={0.1} max={10} step={0.1} unit="%" value={limits.maxHydraulicPowerPercent} onChange={(value) => updateLimit("maxHydraulicPowerPercent", value)} />
-        <RangeField label="T zewn. RPV" min={100} max={700} step={5} unit="°C" value={limits.maxRpvOuterC} onChange={(value) => updateLimit("maxRpvOuterC", value)} />
-        <RangeField label="p wylotu minimum" min={0.2} max={9} step={0.1} unit="MPa" value={limits.minOutletPressureMPa} onChange={(value) => updateLimit("minOutletPressureMPa", value)} />
-        <RangeField label="Straty RCCS / moc" min={0.01} max={1} step={0.01} unit="%" value={limits.maxHeatLossPercent} onChange={(value) => updateLimit("maxHeatLossPercent", value)} />
+
+        <ControlGroup title="Normalna praca">
+          <RangeField label="T paliwa max" min={700} max={1800} step={5} unit="°C" value={limits.maxFuelCenterC} onChange={(value) => updateLimit("maxFuelCenterC", value)} />
+          <RangeField label="T helu na wylocie" min={500} max={1100} step={5} unit="°C" value={limits.maxHeliumOutletC} onChange={(value) => updateLimit("maxHeliumOutletC", value)} />
+          <RangeField label="Moc dmuchawy helu" min={0.5} max={12} step={0.1} unit="MW" value={limits.maxHydraulicPowerMW} onChange={(value) => updateLimit("maxHydraulicPowerMW", value)} />
+          <RangeField label="T zewn. RPV" min={100} max={700} step={5} unit="°C" value={limits.maxRpvOuterC} onChange={(value) => updateLimit("maxRpvOuterC", value)} />
+        </ControlGroup>
+
+        <ControlGroup title="Inherent safety">
+          <CheckboxField
+            checked={limits.inherentSafetyEnabled}
+            label="Uwzględniaj gęstość mocy"
+            onChange={(checked) => setLimits((current) => ({ ...current, inherentSafetyEnabled: checked }))}
+          />
+          {limits.inherentSafetyEnabled && (
+            <RangeField label="Gęstość mocy" min={1} max={8} step={0.1} unit="MW/m³" value={limits.maxThermalPowerDensityMWM3} onChange={(value) => updateLimit("maxThermalPowerDensityMWM3", value)} />
+          )}
+          <p className="limit-note">
+            Próg awaryjny DLOFC: {fmt(DLOFC_FUEL_PEAK_LIMIT_C, 0)} °C. {limits.inherentSafetyEnabled
+              ? "Gęstość mocy wpływa teraz na ocenę limitów."
+              : "Gęstość mocy jest teraz tylko wynikiem informacyjnym."}
+          </p>
+        </ControlGroup>
 
         {solution && (
           <div className={`overall-status ${allSafetyOk ? "ok" : "bad"}`}>
             {allSafetyOk ? <CheckCircle2 size={18} /> : <XCircle size={18} />}
-            <span>{allSafetyOk ? "Dane spełniają limity" : "Występują przekroczenia"}</span>
+            <span>{allSafetyOk ? "Limity steady-state spełnione" : "Przekroczenia steady-state"}</span>
           </div>
         )}
       </aside>
@@ -221,31 +293,376 @@ export default function App() {
   );
 }
 
+function buildProjectAnalysis(inputs: ModelInputs, limits: SafetyLimits): ProjectAnalysis {
+  const nominalInputs = {
+    ...inputs,
+    powerMW: 250,
+    dPebbleCm: 6,
+    mDotKgS: 96,
+  };
+  const investorInputs = {
+    ...inputs,
+    powerMW: 350,
+    dPebbleCm: 4,
+    mDotKgS: 96,
+  };
+
+  const nominal = solveCore1DCase(nominalInputs);
+  const investor = solveCore1DCase(investorInputs);
+  const investorSafetyChecks = evaluateSafety(investor, limits);
+  const investorKtaChecks = buildKtaChecks(investor, investorInputs);
+  const investorSafetyOk = investorSafetyChecks.every((check) => check.ok);
+  const investorKtaOk = investorKtaChecks.every((check) => check.ok);
+  const tempOk = investor.summary.maxFuelCenterC <= limits.maxFuelCenterC;
+  const failedSafetyLabels = investorSafetyChecks
+    .filter((check) => !check.ok)
+    .map((check) => check.label);
+  const minFlow = findMinimumMassFlowForFuelLimit(investorInputs, limits.maxFuelCenterC);
+
+  const deltas = {
+    powerGainMW: investor.summary.totalPowerMW - nominal.summary.totalPowerMW,
+    powerGainPercent: percentChange(investor.summary.totalPowerMW, nominal.summary.totalPowerMW),
+    powerDensityDeltaMWM3: investor.summary.thermalPowerDensityMWM3 - nominal.summary.thermalPowerDensityMWM3,
+    powerDensityPercent: percentChange(investor.summary.thermalPowerDensityMWM3, nominal.summary.thermalPowerDensityMWM3),
+    maxFuelDeltaC: investor.summary.maxFuelCenterC - nominal.summary.maxFuelCenterC,
+    heliumOutletDeltaC: investor.summary.heliumOutletC - nominal.summary.heliumOutletC,
+    pressureDropDeltaKPa: investor.summary.totalPressureDropKPa - nominal.summary.totalPressureDropKPa,
+    pressureDropFactor: safeRatio(investor.summary.totalPressureDropKPa, nominal.summary.totalPressureDropKPa),
+    hydraulicPowerDeltaMW: investor.summary.hydraulicPowerMW - nominal.summary.hydraulicPowerMW,
+    hydraulicPowerFactor: safeRatio(investor.summary.hydraulicPowerMW, nominal.summary.hydraulicPowerMW),
+    hydraulicPowerShareDeltaPct: investor.summary.hydraulicPowerPercent - nominal.summary.hydraulicPowerPercent,
+    netThermalAfterHydraulicGainMW:
+      (investor.summary.totalPowerMW - investor.summary.hydraulicPowerMW)
+      - (nominal.summary.totalPowerMW - nominal.summary.hydraulicPowerMW),
+  };
+
+  return {
+    nominal,
+    investor,
+    minFlow,
+    investorSafetyOk,
+    investorKtaOk,
+    tempOk,
+    deltas,
+    verdict: buildProjectVerdict({
+      investorSafetyOk,
+      investorKtaOk,
+      tempOk,
+      minFlow,
+      investor,
+      limits,
+      failedSafetyLabels,
+    }),
+  };
+}
+
+function findMinimumMassFlowForFuelLimit(
+  baseInputs: ModelInputs,
+  maxFuelCenterC: number,
+): MinimumFlowResult {
+  const solveAt = (mDotKgS: number) => solveCore1DCase({ ...baseInputs, mDotKgS });
+  let lower = 20;
+  let upper = Math.max(baseInputs.mDotKgS, 96);
+  let upperSolution = solveAt(upper);
+
+  if (solveAt(lower).summary.maxFuelCenterC <= maxFuelCenterC) {
+    return {
+      mDotKgS: lower,
+      solution: solveAt(lower),
+    };
+  }
+
+  while (upperSolution.summary.maxFuelCenterC > maxFuelCenterC && upper < 500) {
+    upper *= 1.2;
+    upperSolution = solveAt(upper);
+  }
+
+  if (upperSolution.summary.maxFuelCenterC > maxFuelCenterC) {
+    return null;
+  }
+
+  for (let iteration = 0; iteration < 18; iteration += 1) {
+    const middle = 0.5 * (lower + upper);
+    const middleSolution = solveAt(middle);
+
+    if (middleSolution.summary.maxFuelCenterC <= maxFuelCenterC) {
+      upper = middle;
+      upperSolution = middleSolution;
+    } else {
+      lower = middle;
+    }
+  }
+
+  return {
+    mDotKgS: upper,
+    solution: upperSolution,
+  };
+}
+
+function buildProjectVerdict({
+  investorSafetyOk,
+  investorKtaOk,
+  tempOk,
+  minFlow,
+  investor,
+  limits,
+  failedSafetyLabels,
+}: {
+  investorSafetyOk: boolean;
+  investorKtaOk: boolean;
+  tempOk: boolean;
+  minFlow: MinimumFlowResult;
+  investor: CoreSolution;
+  limits: SafetyLimits;
+  failedSafetyLabels: string[];
+}): ProjectAnalysis["verdict"] {
+  if (!investorKtaOk) {
+    return {
+      status: "warn",
+      title: "Uwaga: zakres KTA jest przekroczony",
+      text: "Wynik liczbowy można oglądać, ale rekomendację trzeba opatrzyć zastrzeżeniem, bo co najmniej jedna korelacja pracuje poza zakresem stosowalności.",
+    };
+  }
+
+  if (investorSafetyOk) {
+    return {
+      status: "ok",
+      title: "Wariant 350 MW / 4 cm spełnia ustawione limity",
+      text: limits.inherentSafetyEnabled
+        ? "Według aktualnego modelu steady-state wariant mieści się w limitach normalnej pracy i w progu gęstości mocy. DLOFC nadal wymaga osobnego modelu transjentu."
+        : "Według aktualnego modelu steady-state wariant mieści się w aktywnych limitach normalnej pracy. Gęstość mocy nie jest teraz włączona do oceny akceptacji.",
+    };
+  }
+
+  if (tempOk) {
+    return {
+      status: "warn",
+      title: "Temperatura paliwa ma zapas, ale wariant nie przechodzi pełnej oceny",
+      text: `Wariant 350 MW / 4 cm mieści się w limicie temperatury paliwa normalnej pracy, ale przekracza: ${failedSafetyLabels.join(", ")}.`,
+    };
+  }
+
+  if (!tempOk && minFlow) {
+    return {
+      status: "warn",
+      title: "Wariant wymaga zwiększenia przepływu helu",
+      text: `Przy 96 kg/s temperatura paliwa przekracza limit ${fmt(limits.maxFuelCenterC, 0)} °C. Model znajduje minimalny przepływ około ${fmt(minFlow.mDotKgS, 1)} kg/s dla wariantu 350 MW / 4 cm.`,
+    };
+  }
+
+  return {
+    status: "bad",
+    title: "Wariant inwestora nie spełnia ustawionych limitów",
+    text: `Największe ograniczenie w aktualnych nastawach to temperatura paliwa ${fmt(investor.summary.maxFuelCenterC, 1)} °C oraz limity przepływowe ustawione w panelu po prawej.`,
+  };
+}
+
 function MetricGrid({
   solution,
-  allSafetyOk,
-  allKtaOk,
+  limits,
 }: {
   solution: CoreSolution;
-  allSafetyOk: boolean;
-  allKtaOk: boolean;
+  limits: SafetyLimits;
 }) {
   const summary = solution.summary;
   return (
     <section className="metric-grid" aria-label="Najważniejsze wyniki">
-      <MetricCard icon={<Flame size={19} />} label="T paliwa max" value={`${fmt(summary.maxFuelCenterC, 1)} °C`} detail={`z = ${fmt(summary.zMaxFuelM, 2)} m`} status={allSafetyOk ? "ok" : "bad"} />
-      <MetricCard icon={<Thermometer size={19} />} label="T helu out" value={`${fmt(summary.heliumOutletC, 1)} °C`} detail={`in = ${fmt(summary.heliumInletC, 0)} °C`} />
-      <MetricCard icon={<Gauge size={19} />} label="Δp całkowite" value={`${fmt(summary.totalPressureDropKPa, 1)} kPa`} detail={`p out = ${fmt(summary.outletPressureMPa, 3)} MPa`} />
-      <MetricCard icon={<Activity size={19} />} label="P hydrauliczna" value={`${fmt(summary.hydraulicPowerMW, 3)} MW`} detail={`${fmt(summary.hydraulicPowerPercent, 3)}% mocy cieplnej`} />
-      <MetricCard icon={<ShieldCheck size={19} />} label="Zakresy KTA" value={allKtaOk ? "OK" : "Poza"} detail={`Re ${compact(summary.reynoldsMin)}-${compact(summary.reynoldsMax)}`} status={allKtaOk ? "ok" : "bad"} />
+      <MetricCard
+        icon={<Flame size={19} />}
+        label="T paliwa max"
+        value={`${fmt(summary.maxFuelCenterC, 1)} °C`}
+        detail={`limit ${fmt(limits.maxFuelCenterC, 0)} °C, z = ${fmt(summary.zMaxFuelM, 2)} m`}
+        status={summary.maxFuelCenterC <= limits.maxFuelCenterC ? "ok" : "bad"}
+      />
+      <MetricCard
+        icon={<Thermometer size={19} />}
+        label="T helu out"
+        value={`${fmt(summary.heliumOutletC, 1)} °C`}
+        detail={`limit ${fmt(limits.maxHeliumOutletC, 0)} °C, in = ${fmt(summary.heliumInletC, 0)} °C`}
+        status={summary.heliumOutletC <= limits.maxHeliumOutletC ? "ok" : "bad"}
+      />
+      <MetricCard
+        icon={<Activity size={19} />}
+        label="P dmuchawy"
+        value={`${fmt(summary.hydraulicPowerMW, 3)} MW`}
+        detail={`limit ${fmt(limits.maxHydraulicPowerMW, 1)} MW, ${fmt(summary.hydraulicPowerPercent, 3)}% Pth`}
+        status={summary.hydraulicPowerMW <= limits.maxHydraulicPowerMW ? "ok" : "bad"}
+      />
+      <MetricCard
+        icon={<ShieldCheck size={19} />}
+        label="T zewn. RPV"
+        value={`${fmt(summary.maxRpvOuterC, 1)} °C`}
+        detail={`limit ${fmt(limits.maxRpvOuterC, 0)} °C`}
+        status={summary.maxRpvOuterC <= limits.maxRpvOuterC ? "ok" : "bad"}
+      />
+      {limits.inherentSafetyEnabled && (
+        <MetricCard
+          icon={<Zap size={19} />}
+          label="Gęstość mocy"
+          value={`${fmt(summary.thermalPowerDensityMWM3, 2)} MW/m³`}
+          detail={`limit ${fmt(limits.maxThermalPowerDensityMWM3, 1)} MW/m³, V = ${fmt(summary.coreVolumeM3, 1)} m³`}
+          status={summary.thermalPowerDensityMWM3 <= limits.maxThermalPowerDensityMWM3 ? "ok" : "bad"}
+        />
+      )}
     </section>
+  );
+}
+
+function AnalysisView({
+  analysis,
+  limits,
+}: {
+  analysis: ProjectAnalysis;
+  limits: SafetyLimits;
+}) {
+  const nominal = analysis.nominal.summary;
+  const investor = analysis.investor.summary;
+  const minFlow = analysis.minFlow;
+  const minFlowSummary = minFlow?.solution.summary;
+  const currentFlowTempMargin = limits.maxFuelCenterC - investor.maxFuelCenterC;
+  const powerDensityMargin = limits.maxThermalPowerDensityMWM3 - investor.thermalPowerDensityMWM3;
+  const minFlowDelta = minFlow ? minFlow.mDotKgS - 96 : null;
+
+  return (
+    <section className="analysis-view">
+      <article className={`analysis-hero ${analysis.verdict.status}`}>
+        <div>
+          <span className="analysis-kicker">Wniosek projektowy</span>
+          <h2>{analysis.verdict.title}</h2>
+          <p>{analysis.verdict.text}</p>
+        </div>
+        <span className={`verdict-badge ${analysis.verdict.status}`}>
+          {analysis.verdict.status === "ok" ? "OK" : analysis.verdict.status === "warn" ? "Uwaga" : "Poza"}
+        </span>
+      </article>
+
+      <div className="analysis-grid">
+        <AnalysisCard
+          icon={<TrendingUp size={18} />}
+          title="Cel 1: porównanie wariantów"
+          value={`+${fmt(analysis.deltas.powerGainMW, 0)} MWth`}
+          detail={`Moc rośnie o ${fmt(analysis.deltas.powerGainPercent, 1)}%, T paliwa zmienia się o ${signed(analysis.deltas.maxFuelDeltaC, 1)} °C.`}
+          status={analysis.tempOk ? "ok" : "warn"}
+        />
+        {limits.inherentSafetyEnabled && (
+          <AnalysisCard
+            icon={<Zap size={18} />}
+            title="Gęstość mocy cieplnej"
+            value={`${fmt(investor.thermalPowerDensityMWM3, 2)} MW/m³`}
+            detail={`Limit ${fmt(limits.maxThermalPowerDensityMWM3, 1)} MW/m³, margines ${signed(powerDensityMargin, 2)} MW/m³; zmiana ${fmt(analysis.deltas.powerDensityPercent, 1)}%.`}
+            status={powerDensityMargin >= 0 ? "ok" : "bad"}
+          />
+        )}
+        <AnalysisCard
+          icon={<Flame size={18} />}
+          title="Temperatura paliwa"
+          value={`${fmt(investor.maxFuelCenterC, 1)} °C`}
+          detail={`Limit ${fmt(limits.maxFuelCenterC, 0)} °C, margines ${signed(currentFlowTempMargin, 1)} °C przy 350 MW / 4 cm / 96 kg/s.`}
+          status={currentFlowTempMargin >= 0 ? "ok" : "bad"}
+        />
+        <AnalysisCard
+          icon={<Gauge size={18} />}
+          title="Cel 2: koszt przepływu"
+          value={`${fmt(analysis.deltas.pressureDropFactor, 2)}× Δp`}
+          detail={`P dmuchawy: ${fmt(investor.hydraulicPowerMW, 3)} MW vs limit ${fmt(limits.maxHydraulicPowerMW, 1)} MW; udział ${fmt(investor.hydraulicPowerPercent, 2)}%.`}
+          status={investor.hydraulicPowerMW <= limits.maxHydraulicPowerMW ? "ok" : "warn"}
+        />
+        <AnalysisCard
+          icon={<Activity size={18} />}
+          title="Cel 3: minimalny strumień helu"
+          value={minFlow ? `${fmt(minFlow.mDotKgS, 1)} kg/s` : "brak <= 500"}
+          detail={minFlow
+            ? `To ${signed(minFlowDelta ?? 0, 1)} kg/s względem 96 kg/s; T paliwa wtedy ${fmt(minFlowSummary?.maxFuelCenterC, 1)} °C.`
+            : "W zadanym zakresie szukania temperatura paliwa nie schodzi poniżej limitu."}
+          status={minFlow ? "ok" : "bad"}
+        />
+      </div>
+
+      <div className="analysis-table-panel">
+        <table className="analysis-table">
+          <thead>
+            <tr>
+              <th>Wielkość</th>
+              <th>Nominalnie 250 MW / 6 cm</th>
+              <th>Inwestor 350 MW / 4 cm</th>
+              <th>Zmiana</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Gęstość mocy cieplnej</td>
+              <td>{fmt(nominal.thermalPowerDensityMWM3, 2)} MW/m³</td>
+              <td>{fmt(investor.thermalPowerDensityMWM3, 2)} MW/m³</td>
+              <td>{signed(analysis.deltas.powerDensityDeltaMWM3, 2)} MW/m³</td>
+            </tr>
+            <tr>
+              <td>T paliwa max</td>
+              <td>{fmt(nominal.maxFuelCenterC, 1)} °C</td>
+              <td>{fmt(investor.maxFuelCenterC, 1)} °C</td>
+              <td>{signed(analysis.deltas.maxFuelDeltaC, 1)} °C</td>
+            </tr>
+            <tr>
+              <td>T helu na wylocie</td>
+              <td>{fmt(nominal.heliumOutletC, 1)} °C</td>
+              <td>{fmt(investor.heliumOutletC, 1)} °C</td>
+              <td>{signed(analysis.deltas.heliumOutletDeltaC, 1)} °C</td>
+            </tr>
+            <tr>
+              <td>Spadek ciśnienia</td>
+              <td>{fmt(nominal.totalPressureDropKPa, 1)} kPa</td>
+              <td>{fmt(investor.totalPressureDropKPa, 1)} kPa</td>
+              <td>{fmt(analysis.deltas.pressureDropFactor, 2)}×</td>
+            </tr>
+            <tr>
+              <td>Moc hydrauliczna</td>
+              <td>{fmt(nominal.hydraulicPowerMW, 3)} MW</td>
+              <td>{fmt(investor.hydraulicPowerMW, 3)} MW</td>
+              <td>{fmt(analysis.deltas.hydraulicPowerFactor, 2)}×</td>
+            </tr>
+            <tr>
+              <td>Liczba kul</td>
+              <td>{compact(nominal.nPebblesTotal)}</td>
+              <td>{compact(investor.nPebblesTotal)}</td>
+              <td>{fmt(safeRatio(investor.nPebblesTotal, nominal.nPebblesTotal), 2)}×</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function AnalysisCard({
+  icon,
+  title,
+  value,
+  detail,
+  status,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  value: string;
+  detail: string;
+  status: "ok" | "warn" | "bad";
+}) {
+  return (
+    <article className={`analysis-card ${status}`}>
+      <div className="analysis-card-icon">{icon}</div>
+      <div>
+        <span>{title}</span>
+        <strong>{value}</strong>
+        <p>{detail}</p>
+      </div>
+    </article>
   );
 }
 
 function ChartsView({
   solution,
+  limits,
 }: {
   solution: CoreSolution;
+  limits: SafetyLimits;
 }) {
   const rows = solution.rows;
   const z = rows.map((row) => row.z_mid_m);
@@ -260,6 +677,10 @@ function ChartsView({
             { label: "Hel średni", values: rows.map((row) => row.t_he_mean_C), color: chartColors.helium, unit: "°C" },
             { label: "Centrum kuli paliwowej", values: rows.map((row) => row.t_fuel_center_C), color: chartColors.fuelCenter, unit: "°C", width: 2.3 },
           ]}
+          referenceLines={[
+            { label: "Limit He out", value: limits.maxHeliumOutletC, color: chartColors.helium, unit: "°C" },
+            { label: "Limit paliwa", value: limits.maxFuelCenterC, color: chartColors.fuelCenter, unit: "°C" },
+          ]}
         />
       </ChartPanel>
 
@@ -272,6 +693,9 @@ function ChartsView({
           series={[
             { label: "Δp skum.", values: rows.map((row) => row.delta_p_cumulative_kPa), color: chartColors.pressure, unit: "kPa" },
             { label: "P hyd skum.", values: rows.map((row) => row.hydraulic_power_cumulative_MW), color: chartColors.hydraulic, unit: "MW", scale: "y2", dash: [7, 5], digits: 3 },
+          ]}
+          referenceLines={[
+            { label: "Limit dmuchawy", value: limits.maxHydraulicPowerMW, color: chartColors.hydraulic, unit: "MW", scale: "y2", digits: 1 },
           ]}
         />
       </ChartPanel>
@@ -308,16 +732,7 @@ function ChartsView({
 function CasesView({
   comparisonRows,
 }: {
-  comparisonRows: Array<{
-    label: string;
-    maxFuelCenterC: number;
-    heliumOutletC: number;
-    totalPressureDropKPa: number;
-    hydraulicPowerMW: number;
-    hydraulicPowerPercent: number;
-    nPebblesTotal: number;
-    ok: boolean;
-  }>;
+  comparisonRows: ComparisonRow[];
 }) {
   return (
     <section className="table-panel">
@@ -333,6 +748,7 @@ function CasesView({
               <th>T He out</th>
               <th>Δp</th>
               <th>P hyd</th>
+              <th>q'''</th>
               <th>N kul</th>
               <th>Limity</th>
             </tr>
@@ -345,6 +761,7 @@ function CasesView({
                 <td>{fmt(row.heliumOutletC, 1)} °C</td>
                 <td>{fmt(row.totalPressureDropKPa, 1)} kPa</td>
                 <td>{fmt(row.hydraulicPowerMW, 3)} MW</td>
+                <td>{fmt(row.thermalPowerDensityMWM3, 2)} MW/m³</td>
                 <td>{compact(row.nPebblesTotal)}</td>
                 <td><StatusPill ok={row.ok} /></td>
               </tr>
@@ -367,18 +784,29 @@ type PlotSeries = {
   digits?: number;
 };
 
+type PlotReferenceLine = {
+  label: string;
+  value: number;
+  color: string;
+  unit?: string;
+  scale?: "y" | "y2";
+  digits?: number;
+};
+
 function UPlotChart({
   xValues,
   xLabel,
   yLabel,
   y2Label,
   series,
+  referenceLines = [],
 }: {
   xValues: number[];
   xLabel: string;
   yLabel: string;
   y2Label?: string;
   series: PlotSeries[];
+  referenceLines?: PlotReferenceLine[];
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const tooltipRef = useRef<HTMLDivElement | null>(null);
@@ -473,6 +901,11 @@ function UPlotChart({
         })),
       ],
       hooks: {
+        draw: [
+          (self: uPlot) => {
+            drawReferenceLines(self, referenceLines);
+          },
+        ],
         setCursor: [
           (self: uPlot) => {
             const tooltip = tooltipRef.current;
@@ -526,7 +959,7 @@ function UPlotChart({
         ],
       },
     };
-  }, [series, xLabel, xValues, y2Label, yLabel]);
+  }, [referenceLines, series, xLabel, xValues, y2Label, yLabel]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -567,6 +1000,12 @@ function UPlotChart({
             {item.label}
           </span>
         ))}
+        {referenceLines.map((item) => (
+          <span className="plot-legend-item muted" key={`${item.label}-${item.scale ?? "y"}-${item.value}`}>
+            <span className="plot-legend-swatch dashed" style={{ borderColor: item.color }} />
+            {item.label}
+          </span>
+        ))}
       </div>
       <div className="uplot-host" ref={hostRef} />
       <div className="plot-tooltip" ref={tooltipRef} hidden />
@@ -574,11 +1013,91 @@ function UPlotChart({
   );
 }
 
-function LimitsView({ checks }: { checks: SafetyCheck[] }) {
+function drawReferenceLines(self: uPlot, referenceLines: PlotReferenceLine[]) {
+  if (referenceLines.length === 0) {
+    return;
+  }
+
+  const ctx = self.ctx;
+  const pxRatio = uPlot.pxRatio || 1;
+  const plotLeft = self.bbox.left;
+  const plotTop = self.bbox.top;
+  const plotWidth = self.bbox.width;
+  const plotHeight = self.bbox.height;
+  const plotRight = plotLeft + plotWidth;
+  const plotBottom = plotTop + plotHeight;
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(plotLeft, plotTop, plotWidth, plotHeight);
+  ctx.clip();
+
+  referenceLines.forEach((line, index) => {
+    const scaleKey = line.scale ?? "y";
+    const scale = self.scales[scaleKey];
+    if (!scale || !Number.isFinite(line.value)) {
+      return;
+    }
+
+    const rawY = self.valToPos(line.value, scaleKey, true);
+    if (!Number.isFinite(rawY)) {
+      return;
+    }
+
+    const scaleMin = scale.min ?? Number.NEGATIVE_INFINITY;
+    const scaleMax = scale.max ?? Number.POSITIVE_INFINITY;
+    if (line.value < scaleMin || line.value > scaleMax || rawY < plotTop || rawY > plotBottom) {
+      return;
+    }
+
+    const y = rawY;
+    const yLine = Math.round(y) + 0.5;
+
+    ctx.save();
+    ctx.globalAlpha = 0.74;
+    ctx.strokeStyle = line.color;
+    ctx.lineWidth = Math.max(1, pxRatio);
+    ctx.setLineDash([6 * pxRatio, 4 * pxRatio]);
+    ctx.beginPath();
+    ctx.moveTo(plotLeft, yLine);
+    ctx.lineTo(plotRight, yLine);
+    ctx.stroke();
+
+    const value = `${fmt(line.value, line.digits ?? 0)}${line.unit ? ` ${line.unit}` : ""}`;
+    const text = `${line.label}: ${value}`;
+    const fontSize = 11 * pxRatio;
+    const padX = 5 * pxRatio;
+    const labelHeight = 16 * pxRatio;
+    const labelY = Math.min(
+      Math.max(y + (index % 2 === 0 ? -1 : 1) * 2 * pxRatio, plotTop + labelHeight / 2 + 2 * pxRatio),
+      plotBottom - labelHeight / 2 - 2 * pxRatio,
+    );
+
+    ctx.font = `700 ${fontSize}px Inter, Arial, sans-serif`;
+    const textWidth = ctx.measureText(text).width;
+    const labelX = plotLeft + 6 * pxRatio;
+    const bgX = labelX;
+    const bgY = labelY - labelHeight / 2;
+
+    ctx.globalAlpha = 0.84;
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(bgX, bgY, textWidth + 2 * padX, labelHeight);
+    ctx.globalAlpha = 0.95;
+    ctx.fillStyle = line.color;
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    ctx.fillText(text, labelX + padX, labelY);
+    ctx.restore();
+  });
+
+  ctx.restore();
+}
+
+function LimitsView({ checks, limits }: { checks: SafetyCheck[]; limits: SafetyLimits }) {
   return (
     <section className="table-panel">
       <div className="table-header">
-        <h2>Ocena według limitów akceptacji</h2>
+        <h2>Ocena według limitów steady-state</h2>
         <StatusPill ok={checks.every((check) => check.ok)} />
       </div>
       <div className="table-scroll">
@@ -604,6 +1123,15 @@ function LimitsView({ checks }: { checks: SafetyCheck[] }) {
             ))}
           </tbody>
         </table>
+      </div>
+      <div className="emergency-note">
+        <h3>Oś awaryjna</h3>
+        <p>
+          Pik paliwa DLOFC ma próg {fmt(DLOFC_FUEL_PEAK_LIMIT_C, 0)} °C, ale wymaga modelu transjentu.
+          {limits.inherentSafetyEnabled
+            ? " Gęstość mocy cieplnej jest włączona jako najprostszy wskaźnik zapasu inherent safety."
+            : " Gęstość mocy cieplnej jest wyłączona z oceny limitów."}
+        </p>
       </div>
     </section>
   );
@@ -689,6 +1217,25 @@ function RangeField({
   );
 }
 
+function CheckboxField({
+  checked,
+  label,
+  onChange,
+}: {
+  checked: boolean;
+  label: string;
+  onChange: (checked: boolean) => void;
+}) {
+  const id = useId();
+
+  return (
+    <label className="checkbox-field" htmlFor={id}>
+      <input id={id} type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} />
+      <span>{label}</span>
+    </label>
+  );
+}
+
 function ControlGroup({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="control-group">
@@ -752,16 +1299,25 @@ function StatusPill({ ok }: { ok: boolean }) {
 
 function TabButton({
   active,
+  attention = false,
   onClick,
   children,
 }: {
   active: boolean;
+  attention?: boolean;
   onClick: () => void;
   children: React.ReactNode;
 }) {
+  const className = [
+    "tab-button",
+    active ? "active" : "",
+    attention ? "attention" : "",
+  ].filter(Boolean).join(" ");
+
   return (
-    <button className={active ? "tab-button active" : "tab-button"} onClick={onClick} type="button">
+    <button className={className} onClick={onClick} title={attention ? "Przekroczenie - zobacz szczegóły" : undefined} type="button">
       {children}
+      {attention && <span className="tab-alert" aria-hidden="true">!</span>}
     </button>
   );
 }
@@ -785,6 +1341,26 @@ function formatAxisValue(value: number): string {
     return fmt(value, 1);
   }
   return fmt(value, 2);
+}
+
+function safeRatio(value: number, reference: number): number {
+  if (reference === 0) {
+    return Number.NaN;
+  }
+
+  return value / reference;
+}
+
+function percentChange(value: number, reference: number): number {
+  return 100 * (safeRatio(value, reference) - 1);
+}
+
+function signed(value: number, digits = 1): string {
+  if (!Number.isFinite(value)) {
+    return "—";
+  }
+
+  return `${value >= 0 ? "+" : ""}${fmt(value, digits)}`;
 }
 
 function compact(value: number): string {

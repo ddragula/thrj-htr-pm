@@ -4,6 +4,8 @@ export const SIGMA_STEFAN_BOLTZMANN = 5.670374419e-8;
 const NOMINAL_PEBBLES = 420_000;
 const NOMINAL_PEBBLE_DIAMETER_M = 0.06;
 
+export const DLOFC_FUEL_PEAK_LIMIT_C = 1620;
+
 export type ModelInputs = {
   powerMW: number;
   tHeInC: number;
@@ -31,11 +33,10 @@ export type ModelInputs = {
 export type SafetyLimits = {
   maxFuelCenterC: number;
   maxHeliumOutletC: number;
-  maxPressureDropKPa: number;
-  maxHydraulicPowerPercent: number;
+  maxHydraulicPowerMW: number;
+  inherentSafetyEnabled: boolean;
+  maxThermalPowerDensityMWM3: number;
   maxRpvOuterC: number;
-  minOutletPressureMPa: number;
-  maxHeatLossPercent: number;
 };
 
 export type NodeResult = {
@@ -114,6 +115,8 @@ export type NodeResult = {
 
 export type CoreSummary = {
   totalPowerMW: number;
+  coreVolumeM3: number;
+  thermalPowerDensityMWM3: number;
   heliumInletC: number;
   heliumOutletC: number;
   maxFuelCenterC: number;
@@ -163,7 +166,7 @@ export const DEFAULT_INPUTS: ModelInputs = {
   tHeInC: 250,
   pHeInMPa: 7,
   mDotKgS: 96,
-  nNodes: 15,
+  nNodes: 80,
   coreHeightM: 11,
   coreDiameterM: 3,
   dPebbleCm: 6,
@@ -183,13 +186,12 @@ export const DEFAULT_INPUTS: ModelInputs = {
 };
 
 export const DEFAULT_LIMITS: SafetyLimits = {
-  maxFuelCenterC: 1600,
-  maxHeliumOutletC: 800,
-  maxPressureDropKPa: 150,
-  maxHydraulicPowerPercent: 2,
-  maxRpvOuterC: 400,
-  minOutletPressureMPa: 5,
-  maxHeatLossPercent: 0.1,
+  maxFuelCenterC: 1200,
+  maxHeliumOutletC: 765,
+  maxHydraulicPowerMW: 4.5,
+  inherentSafetyEnabled: false,
+  maxThermalPowerDensityMWM3: 3.3,
+  maxRpvOuterC: 350,
 };
 
 export const CASE_PRESETS = [
@@ -768,21 +770,27 @@ export function solveCore1DCase(inputs: ModelInputs): CoreSolution {
 
   return {
     rows,
-    summary: summarizeCore1DResults(rows),
+    summary: summarizeCore1DResults(rows, inputs),
   };
 }
 
-export function summarizeCore1DResults(rows: NodeResult[]): CoreSummary {
+export function summarizeCore1DResults(
+  rows: NodeResult[],
+  inputs: Pick<ModelInputs, "coreDiameterM" | "coreHeightM">,
+): CoreSummary {
   if (rows.length === 0) {
     throw new Error("Brak wyników modelu 1D.");
   }
   const totalPowerMW = sum(rows.map((row) => row.node_power_MW));
+  const coreVolumeM3 = computeCylinderVolume(inputs.coreDiameterM, inputs.coreHeightM);
   const totalHeatLossKW = sum(rows.map((row) => row.q_loss_kW));
   const hydraulicPowerMW = sum(rows.map((row) => row.hydraulic_power_kW)) / 1000;
   const totalPressureDropKPa = sum(rows.map((row) => row.delta_p_node_kPa));
   const maxFuelRow = maxBy(rows, (row) => row.t_fuel_center_C);
   return {
     totalPowerMW,
+    coreVolumeM3,
+    thermalPowerDensityMWM3: totalPowerMW / coreVolumeM3,
     heliumInletC: rows[0].t_he_in_C,
     heliumOutletC: rows[rows.length - 1].t_he_out_C,
     maxFuelCenterC: maxFuelRow.t_fuel_center_C,
@@ -807,15 +815,19 @@ export function summarizeCore1DResults(rows: NodeResult[]): CoreSummary {
 
 export function evaluateSafety(solution: CoreSolution, limits: SafetyLimits): SafetyCheck[] {
   const summary = solution.summary;
-  return [
-    upperCheck("Temperatura centrum paliwa", summary.maxFuelCenterC, "°C", limits.maxFuelCenterC),
+  const checks = [
+    upperCheck("Temperatura centrum paliwa, normalna praca", summary.maxFuelCenterC, "°C", limits.maxFuelCenterC),
     upperCheck("Temperatura helu na wylocie", summary.heliumOutletC, "°C", limits.maxHeliumOutletC),
-    upperCheck("Całkowity spadek ciśnienia", summary.totalPressureDropKPa, "kPa", limits.maxPressureDropKPa),
-    upperCheck("Moc hydrauliczna / moc cieplna", summary.hydraulicPowerPercent, "%", limits.maxHydraulicPowerPercent),
-    upperCheck("Temperatura zewnętrznej powierzchni RPV", summary.maxRpvOuterC, "°C", limits.maxRpvOuterC),
-    lowerCheck("Ciśnienie helu na wylocie", summary.outletPressureMPa, "MPa", limits.minOutletPressureMPa),
-    upperCheck("Straty ciepła do RCCS / moc cieplna", summary.heatLossPercent, "%", limits.maxHeatLossPercent),
+    upperCheck("Moc dmuchawy helu", summary.hydraulicPowerMW, "MW", limits.maxHydraulicPowerMW),
   ];
+
+  if (limits.inherentSafetyEnabled) {
+    checks.push(upperCheck("Gęstość mocy cieplnej", summary.thermalPowerDensityMWM3, "MW/m³", limits.maxThermalPowerDensityMWM3));
+  }
+
+  checks.push(upperCheck("Temperatura zewnętrznej powierzchni RPV", summary.maxRpvOuterC, "°C", limits.maxRpvOuterC));
+
+  return checks;
 }
 
 export function buildKtaChecks(solution: CoreSolution, inputs: ModelInputs): KtaCheck[] {
@@ -849,17 +861,6 @@ function upperCheck(label: string, value: number, unit: string, limit: number): 
     condition: `<= ${formatCompact(limit)} ${unit}`,
     ok: value <= limit,
     margin: limit - value,
-  };
-}
-
-function lowerCheck(label: string, value: number, unit: string, limit: number): SafetyCheck {
-  return {
-    label,
-    value,
-    unit,
-    condition: `>= ${formatCompact(limit)} ${unit}`,
-    ok: value >= limit,
-    margin: value - limit,
   };
 }
 
