@@ -40,7 +40,7 @@ jobs:
       - name: Build
         run: npm run build
         env:
-          VITE_BASE_PATH: /trj-htr-pm/
+          VITE_BASE_PATH: ./
 
       - name: Upload GitHub Pages artifact
         uses: actions/upload-pages-artifact@v5
