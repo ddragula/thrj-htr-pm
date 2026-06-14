@@ -106,6 +106,9 @@ export type NodeResult = {
   q_loss_kW: number;
   q_convection_kW: number;
   q_radiation_kW: number;
+  q_loss_kW_per_m: number;
+  q_convection_kW_per_m: number;
+  q_radiation_kW_per_m: number;
   q_loss_cumulative_kW: number;
   q_loss_fraction_percent: number;
   hydraulic_power_kW: number;
@@ -757,6 +760,9 @@ export function solveCore1DCase(inputs: ModelInputs): CoreSolution {
       q_loss_kW: node.q_loss_W / 1000,
       q_convection_kW: node.q_convection_W / 1000,
       q_radiation_kW: node.q_radiation_W / 1000,
+      q_loss_kW_per_m: node.q_loss_W / hNodeM / 1000,
+      q_convection_kW_per_m: node.q_convection_W / hNodeM / 1000,
+      q_radiation_kW_per_m: node.q_radiation_W / hNodeM / 1000,
       q_loss_cumulative_kW: qLossCumulativeKW,
       q_loss_fraction_percent: 100 * node.q_loss_fraction,
       hydraulic_power_kW: node.hydraulic_power_W / 1000,

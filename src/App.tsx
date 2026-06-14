@@ -717,11 +717,11 @@ function ChartsView({
         <UPlotChart
           xValues={z}
           xLabel="Wysokość rdzenia z [m]"
-          yLabel="Lokalne straty ciepła [kW]"
+          yLabel="Strata ciepła do RCCS [kW/m]"
           series={[
-            { label: "Konwekcja", values: rows.map((row) => row.q_convection_kW), color: chartColors.convection, unit: "kW", digits: 4 },
-            { label: "Radiacja", values: rows.map((row) => row.q_radiation_kW), color: chartColors.radiation, unit: "kW", digits: 4 },
-            { label: "Suma strat", values: rows.map((row) => row.q_loss_kW), color: chartColors.total, unit: "kW", dash: [7, 5], digits: 4 },
+            { label: "Konwekcja", values: rows.map((row) => row.q_convection_kW_per_m), color: chartColors.convection, unit: "kW/m", digits: 4 },
+            { label: "Radiacja", values: rows.map((row) => row.q_radiation_kW_per_m), color: chartColors.radiation, unit: "kW/m", digits: 4 },
+            { label: "Suma strat", values: rows.map((row) => row.q_loss_kW_per_m), color: chartColors.total, unit: "kW/m", dash: [7, 5], digits: 4 },
           ]}
         />
       </ChartPanel>
