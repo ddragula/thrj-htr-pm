@@ -16,6 +16,7 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
+  overflow: hidden;
 }
 
 button,
@@ -30,9 +31,11 @@ button {
 .app-shell {
   display: grid;
   grid-template-columns: minmax(260px, 320px) minmax(0, 1fr) minmax(250px, 300px);
-  gap: 16px;
-  min-height: 100vh;
-  padding: 16px;
+  gap: 12px;
+  height: 100vh;
+  min-height: 0;
+  padding: 12px;
+  overflow: hidden;
 }
 
 .side-panel,
@@ -42,30 +45,32 @@ button {
 
 .side-panel {
   align-self: start;
-  max-height: calc(100vh - 32px);
+  max-height: calc(100vh - 24px);
   overflow: auto;
   border: 1px solid #d7dde2;
   border-radius: 8px;
   background: #ffffff;
   box-shadow: 0 12px 28px rgba(31, 43, 53, 0.08);
-  padding: 14px;
+  padding: 12px;
 }
 
 .workspace {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  min-height: 0;
+  gap: 10px;
+  overflow: hidden;
 }
 
 .workspace-header {
   display: flex;
   align-items: end;
   justify-content: space-between;
-  gap: 14px;
+  gap: 10px;
   border: 1px solid #d7dde2;
   border-radius: 8px;
   background: #ffffff;
-  padding: 16px 18px;
+  padding: 10px 12px;
   box-shadow: 0 12px 28px rgba(31, 43, 53, 0.07);
 }
 
@@ -86,14 +91,14 @@ p {
 
 h1 {
   margin-bottom: 0;
-  font-size: 1.35rem;
+  font-size: 1.08rem;
   line-height: 1.2;
   letter-spacing: 0;
 }
 
 h2 {
-  margin-bottom: 10px;
-  font-size: 0.94rem;
+  margin-bottom: 8px;
+  font-size: 0.88rem;
   line-height: 1.25;
   letter-spacing: 0;
 }
@@ -123,7 +128,7 @@ h2 {
   align-items: center;
   justify-content: center;
   gap: 7px;
-  min-height: 36px;
+  min-height: 32px;
   border-radius: 7px;
   cursor: pointer;
   transition:
@@ -219,8 +224,8 @@ input[type="range"] {
 }
 
 .tab-button {
-  min-width: 84px;
-  padding: 0 12px;
+  min-width: 78px;
+  padding: 0 10px;
   background: transparent;
   color: #4c5963;
   font-weight: 800;
@@ -235,19 +240,19 @@ input[type="range"] {
 .metric-grid {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 12px;
+  gap: 8px;
 }
 
 .metric-card {
   display: grid;
-  grid-template-columns: 34px minmax(0, 1fr);
-  gap: 10px;
+  grid-template-columns: 30px minmax(0, 1fr);
+  gap: 8px;
   align-items: center;
-  min-height: 92px;
+  min-height: 66px;
   border: 1px solid #d7dde2;
   border-radius: 8px;
   background: #ffffff;
-  padding: 12px;
+  padding: 9px;
   box-shadow: 0 10px 22px rgba(31, 43, 53, 0.06);
 }
 
@@ -261,8 +266,8 @@ input[type="range"] {
 
 .metric-icon {
   display: grid;
-  width: 34px;
-  height: 34px;
+  width: 30px;
+  height: 30px;
   place-items: center;
   border-radius: 7px;
   background: #edf4f3;
@@ -273,16 +278,16 @@ input[type="range"] {
 .metric-card small {
   display: block;
   color: #66737d;
-  font-size: 0.78rem;
+  font-size: 0.72rem;
   line-height: 1.25;
 }
 
 .metric-card strong {
   display: block;
-  margin: 3px 0;
+  margin: 2px 0;
   overflow-wrap: anywhere;
   color: #1c252c;
-  font-size: 1.05rem;
+  font-size: 0.94rem;
   line-height: 1.2;
 }
 
@@ -295,7 +300,10 @@ input[type="range"] {
 .chart-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+  flex: 1 1 auto;
+  min-height: 0;
+  gap: 10px;
 }
 
 .chart-panel,
@@ -308,22 +316,132 @@ input[type="range"] {
 }
 
 .chart-panel {
-  min-height: 354px;
-  padding: 14px 14px 10px;
-}
-
-.chart-panel:first-child {
-  grid-column: 1 / -1;
-  min-height: 410px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  padding: 8px 10px 6px;
 }
 
 .chart-box {
+  flex: 1 1 auto;
   width: 100%;
-  height: 300px;
+  min-height: 0;
 }
 
-.chart-panel:first-child .chart-box {
-  height: 356px;
+.chart-panel h2 {
+  margin-bottom: 2px;
+  font-size: 0.82rem;
+}
+
+.plot-shell {
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.plot-legend {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  min-height: 18px;
+  margin-bottom: 1px;
+  overflow: hidden;
+  color: #52606b;
+  font-size: 0.68rem;
+  font-weight: 750;
+  line-height: 1.1;
+}
+
+.plot-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.plot-legend-swatch {
+  width: 14px;
+  height: 3px;
+  border-radius: 99px;
+}
+
+.uplot-host {
+  flex: 1 1 auto;
+  width: 100%;
+  height: 100%;
+  min-height: 160px;
+}
+
+.uplot-host .uplot {
+  width: 100% !important;
+  height: 100% !important;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+}
+
+.uplot-host .u-wrap {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.uplot-host .u-legend {
+  max-width: 100%;
+  overflow: hidden;
+  font-size: 10px;
+  line-height: 1.15;
+}
+
+.uplot-host .u-legend .u-value {
+  font-variant-numeric: tabular-nums;
+}
+
+.plot-tooltip {
+  position: absolute;
+  z-index: 5;
+  max-width: min(260px, calc(100% - 16px));
+  border: 1px solid #cfd7dd;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 10px 26px rgba(31, 43, 53, 0.18);
+  color: #1d2329;
+  font-size: 0.72rem;
+  line-height: 1.25;
+  padding: 8px 9px;
+  pointer-events: none;
+}
+
+.plot-tooltip-title {
+  margin-bottom: 6px;
+  color: #52606b;
+  font-weight: 850;
+}
+
+.plot-tooltip-row {
+  display: grid;
+  grid-template-columns: 10px minmax(82px, 1fr) auto;
+  gap: 6px;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.plot-tooltip-row + .plot-tooltip-row {
+  margin-top: 4px;
+}
+
+.plot-tooltip-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.plot-tooltip-row strong {
+  font-variant-numeric: tabular-nums;
 }
 
 .table-panel {
@@ -429,12 +547,6 @@ td {
   font-weight: 800;
 }
 
-.recharts-default-tooltip {
-  border-radius: 7px !important;
-  border-color: #cfd7dd !important;
-  box-shadow: 0 10px 24px rgba(31, 43, 53, 0.12);
-}
-
 @media (max-width: 1180px) {
   .app-shell {
     grid-template-columns: minmax(250px, 310px) minmax(0, 1fr);
@@ -451,8 +563,15 @@ td {
 }
 
 @media (max-width: 860px) {
+  body {
+    overflow: auto;
+  }
+
   .app-shell {
     grid-template-columns: 1fr;
+    height: auto;
+    min-height: 100vh;
+    overflow: visible;
     padding: 10px;
   }
 
@@ -479,12 +598,16 @@ td {
     grid-template-columns: 1fr;
   }
 
+  .chart-grid {
+    grid-template-rows: none;
+  }
+
   .metric-grid {
     gap: 10px;
   }
 
-  .chart-panel:first-child {
-    grid-column: auto;
+  .chart-panel {
+    min-height: 320px;
   }
 }
 

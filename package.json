@@ -13,7 +13,7 @@
     "lucide-react": "^1.18.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
-    "recharts": "^3.8.1"
+    "uplot": "^1.6.32"
   },
   "devDependencies": {
     "@types/node": "^25.9.3",

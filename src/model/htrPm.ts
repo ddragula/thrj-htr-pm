@@ -163,7 +163,7 @@ export const DEFAULT_INPUTS: ModelInputs = {
   tHeInC: 250,
   pHeInMPa: 7,
   mDotKgS: 96,
-  nNodes: 100,
+  nNodes: 15,
   coreHeightM: 11,
   coreDiameterM: 3,
   dPebbleCm: 6,
