@@ -801,38 +801,35 @@ td {
 }
 
 @media (max-width: 1180px) {
+  body {
+    overflow: hidden;
+  }
+
   .app-shell {
-    grid-template-columns: minmax(250px, 310px) minmax(0, 1fr);
+    grid-template-areas:
+      "parameters workspace"
+      "limits workspace";
+    grid-template-columns: minmax(235px, 285px) minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .parameters-panel {
+    grid-area: parameters;
+  }
+
+  .workspace {
+    grid-area: workspace;
+    height: 100%;
   }
 
   .limits-panel {
-    grid-column: 1 / -1;
-    max-height: none;
+    grid-area: limits;
   }
 
-  .metric-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-
-  .analysis-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
-@media (max-width: 860px) {
-  body {
-    overflow: auto;
-  }
-
-  .app-shell {
-    grid-template-columns: 1fr;
-    height: auto;
-    min-height: 100vh;
-    overflow: visible;
-    padding: 10px;
-  }
-
-  .side-panel {
+  .parameters-panel,
+  .limits-panel {
+    align-self: stretch;
+    height: 100%;
     max-height: none;
   }
 
@@ -848,6 +845,31 @@ td {
   .tab-button {
     flex: 1;
     min-width: 0;
+  }
+}
+
+@media (max-width: 860px) {
+  body {
+    overflow: auto;
+  }
+
+  .app-shell {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "parameters"
+      "workspace"
+      "limits";
+    grid-template-rows: none;
+    height: auto;
+    min-height: 100vh;
+    overflow: visible;
+    padding: 10px;
+  }
+
+  .side-panel,
+  .workspace {
+    height: auto;
+    max-height: none;
   }
 
   .metric-grid,
